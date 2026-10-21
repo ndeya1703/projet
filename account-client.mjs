@@ -47,17 +47,36 @@ export class AccountClient {
   async request(path, { token, body, method = 'GET', headers = {} } = {}) {
     if (!this.configured) throw new Error('Les comptes clients ne sont pas encore activés.');
     let response;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
     try {
       response = await this.fetch(`${this.config.url.replace(/\/$/, '')}${path}`, {
         method,
         headers: { apikey: this.config.publishableKey, ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers },
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-        signal: AbortSignal.timeout(15000),
+        signal: controller.signal,
       });
-    } catch { throw new Error('Connexion impossible. Vérifiez votre connexion puis réessayez.'); }
+    } catch (cause) {
+      const error = new Error(controller.signal.aborted ? 'Le service met trop de temps à répondre. Réessayez dans quelques instants.' : 'Connexion impossible. Vérifiez votre connexion puis réessayez.');
+      error.code = 'connection_unavailable';
+      throw error;
+    } finally { clearTimeout(timeout); }
     const data = await response.json().catch(() => null);
     if (!response.ok) {
-      const error = new Error(response.status === 429 ? 'Trop de tentatives. Patientez avant de réessayer.' : data?.error_code === 'email_not_confirmed' ? 'Confirmez votre adresse e-mail avant de vous connecter.' : path.startsWith('/auth/v1/token?grant_type=password') ? 'Adresse e-mail ou mot de passe incorrect, ou adresse non confirmée.' : path.startsWith('/rest/') ? 'Impossible de synchroniser votre panier. Réessayez dans quelques instants.' : 'Impossible de terminer cette opération. Vérifiez les informations saisies et réessayez.');
+      const code = data?.error_code || (typeof data?.code === 'string' ? data.code : '');
+      const messages = {
+        email_not_confirmed: 'Confirmez votre adresse e-mail avant de vous connecter.',
+        email_address_not_authorized: 'L’envoi des confirmations n’est pas encore configuré pour cette adresse. Contactez la boutique.',
+        email_address_invalid: 'Vérifiez votre adresse e-mail.',
+        over_email_send_rate_limit: 'La limite d’envoi des e-mails est atteinte. Patientez avant de demander un nouveau lien.',
+        signup_disabled: 'Les inscriptions sont temporairement indisponibles. Contactez la boutique.',
+        email_provider_disabled: 'Les inscriptions par e-mail ne sont pas encore disponibles. Contactez la boutique.',
+        weak_password: 'Choisissez un mot de passe plus fort respectant les exigences de la boutique.',
+      };
+      const senderFailure = /error sending confirmation email/i.test(data?.msg || data?.message || '');
+      const message = messages[code] || (response.status === 429 ? 'Trop de tentatives. Patientez avant de réessayer.' : senderFailure ? 'Le service d’envoi des confirmations est indisponible. Réessayez plus tard ou contactez la boutique.' : path.startsWith('/auth/v1/token?grant_type=password') ? 'Adresse e-mail ou mot de passe incorrect, ou adresse non confirmée.' : path.startsWith('/rest/') ? 'Impossible de synchroniser votre panier. Réessayez dans quelques instants.' : 'Impossible de terminer cette opération. Vérifiez les informations saisies et réessayez.');
+      const error = new Error(message);
+      error.code = code;
       error.status = response.status;
       throw error;
     }
@@ -78,6 +97,13 @@ export class AccountClient {
     const data = await this.request('/auth/v1/signup', { method: 'POST', body: { email, password, data: { full_name: name } } });
     if (data?.access_token) this.setSession(data);
     return Boolean(this.session);
+  }
+  async checkConnection() {
+    const settings = await this.request('/auth/v1/settings');
+    return { emailEnabled: settings?.external?.email === true, confirmationRequired: settings?.mailer_autoconfirm === false };
+  }
+  async resendConfirmation(email) {
+    await this.request('/auth/v1/resend', { method: 'POST', body: { type: 'signup', email } });
   }
   async signIn(email, password) {
     this.setSession(await this.request('/auth/v1/token?grant_type=password', { method: 'POST', body: { email, password } }));

@@ -5,7 +5,7 @@ const account=new AccountClient(accountConfig,{storage:sessionStore});
 // Les confirmations e-mail peuvent renvoyer un fragment contenant des jetons.
 // Ne pas les laisser dans l’adresse ; la connexion reste explicite via le formulaire.
 if(new URLSearchParams(window.location.hash.slice(1)).has('access_token')){window.history.replaceState(null,'',window.location.pathname+window.location.search);}
-let accountPending=false,accountLoaded=false,syncFailed=false,accountMode='login',accountEpoch=0,syncRevision=0,syncPending=0;
+let accountPending=false,accountLoaded=false,syncFailed=false,accountMode='login',accountEpoch=0,syncRevision=0,syncPending=0,lastConfirmationEmail='';
 let syncQueue=Promise.resolve(),pendingGuest=[];
 const importedIds=new Set();
 const initial=[
@@ -69,7 +69,7 @@ function renderAccount(){
   $('#logout').disabled=accountPending;
   renderAccountCart();
 }
-function switchAccountMode(mode){accountMode=mode;$('#account-name-label').hidden=mode!=='signup';$('#account-name').required=mode==='signup';$('#account-password').minLength=mode==='signup'?12:1;$('#account-password').autocomplete=mode==='signup'?'new-password':'current-password';$('#password-help').hidden=mode!=='signup';$('#account-submit').textContent=mode==='signup'?'Créer mon compte':'Se connecter';for(const [id,value] of [['login-tab','login'],['signup-tab','signup']]){$('#'+id).classList.toggle('active',mode===value);$('#'+id).setAttribute('aria-pressed',String(mode===value));}$('#account-status').textContent='';}
+function switchAccountMode(mode){accountMode=mode;$('#resend-confirmation').hidden=true;$('#account-name-label').hidden=mode!=='signup';$('#account-name').required=mode==='signup';$('#account-password').minLength=mode==='signup'?12:1;$('#account-password').autocomplete=mode==='signup'?'new-password':'current-password';$('#password-help').hidden=mode!=='signup';$('#account-submit').textContent=mode==='signup'?'Créer mon compte':'Se connecter';for(const [id,value] of [['login-tab','login'],['signup-tab','signup']]){$('#'+id).classList.toggle('active',mode===value);$('#'+id).setAttribute('aria-pressed',String(mode===value));}$('#account-status').textContent='';}
 function openAccount(){renderAccount();$('#account-dialog').showModal();}
 $('#account-button').onclick=openAccount;
 $('#close-account').onclick=()=>$('#account-dialog').close();
@@ -93,12 +93,26 @@ $('#account-form').onsubmit=async event=>{
   try{
     if(accountMode==='signup'){
       if(!String(data.get('name')).trim()){setAccountStatus('Renseignez votre nom.');return;}
+      lastConfirmationEmail=String(data.get('email')).trim();
       const connected=await account.signUp(String(data.get('email')).trim(),String(data.get('password')),String(data.get('name')).trim());
-      if(!connected){setAccountStatus('Si votre inscription est acceptée, vous recevrez un e-mail de confirmation. Confirmez votre adresse puis revenez vous connecter. Si vous avez déjà un compte, utilisez « Se connecter ».');form.reset();return;}
+      if(!connected){$('#resend-confirmation').hidden=false;setAccountStatus('Si votre inscription est acceptée, vous recevrez un e-mail de confirmation. Confirmez votre adresse puis revenez vous connecter. Si vous avez déjà un compte, utilisez « Se connecter ».');form.reset();return;}
     }else{await account.signIn(String(data.get('email')).trim(),String(data.get('password')));}
     form.reset();accountEpoch++;await loadAccount();
-  }catch(error){setAccountStatus(error.message);}
+  }catch(error){setAccountStatus(error.message);if(error.code==='email_not_confirmed'){lastConfirmationEmail=String(data.get('email')).trim();$('#resend-confirmation').hidden=false;}}
   finally{$('#account-password').value='';accountPending=false;renderAccount();}
+};
+$('#check-account-service').onclick=async()=>{
+  if(accountPending)return;accountPending=true;renderAccount();setAccountStatus('Vérification de la connexion…');
+  try{const settings=await account.checkConnection();setAccountStatus(settings.emailEnabled?'La connexion au service fonctionne. Vous pouvez réessayer de créer votre compte. Si l’e-mail n’arrive pas, vérifiez vos courriers indésirables ou contactez la boutique.':'Le service est joignable, mais les inscriptions par e-mail ne sont pas activées. Contactez la boutique.');}
+  catch(error){setAccountStatus(error.message+' Essayez un autre navigateur ou un autre réseau.');}
+  finally{accountPending=false;renderAccount();}
+};
+$('#resend-confirmation').onclick=async()=>{
+  if(accountPending||!lastConfirmationEmail)return;
+  const button=$('#resend-confirmation');button.disabled=true;accountPending=true;setAccountStatus('Demande d’un nouveau lien…');
+  try{await account.resendConfirmation(lastConfirmationEmail);setAccountStatus('Si une confirmation est nécessaire pour cette adresse, un nouveau lien a été demandé. Vérifiez votre boîte de réception et vos courriers indésirables.');}
+  catch(error){setAccountStatus(error.message);}
+  finally{button.disabled=false;accountPending=false;renderAccount();}
 };
 $('#account-retry').onclick=async()=>{if(accountPending)return;if(account.expired){switchAccountMode('login');renderAccount();setAccountStatus('Reconnectez-vous pour retrouver votre panier.');return;}if(!account.user){await restoreAccount();return;}if(accountLoaded)persistCart();else await loadAccount();};
 $('#logout').onclick=async()=>{

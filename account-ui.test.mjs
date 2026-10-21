@@ -13,6 +13,8 @@ function service(){
   const fetchImpl=async(url,options)=>{
     const reply=(body,status=200)=>new Response(JSON.stringify(body),{status});
     const body=options.body?JSON.parse(options.body):{};
+    if(url.includes('/settings'))return reply({external:{email:true},mailer_autoconfirm:false});
+    if(url.includes('/resend'))return reply({});
     if(url.includes('/signup'))return reply({user:{id:'new-customer'}});
     if(url.includes('grant_type=password')){
       if(body.password!=='correct-password')return reply({error:'invalid_grant'},400);
@@ -66,4 +68,12 @@ test('un client retrouve ses produits sur un autre appareil, et un autre compte 
 });
 test('une erreur de connexion garde le formulaire et ne montre pas de profil',async()=>{
   const dom=await page(service());try{await login(dom.window,'alice@example.test','wrong-password');const d=dom.window.document;assert.equal(d.querySelector('#account-profile').hidden,true);assert.equal(d.querySelector('#account-forms').hidden,false);assert.match(d.querySelector('#account-status').textContent,/incorrect/);assert.equal(d.querySelector('#account-password').value,'');}finally{dom.window.close();}
+});
+
+test('le client peut redemander sa confirmation après inscription sans créer de session',async()=>{
+  const dom=await page(service());try{const {window}=dom,d=window.document;d.querySelector('#signup-tab').click();d.querySelector('#account-name').value='Alice';d.querySelector('#account-email').value='alice@example.test';d.querySelector('#account-password').value='correct-password';d.querySelector('#account-form').dispatchEvent(new window.Event('submit',{cancelable:true}));await settle();const resend=d.querySelector('#resend-confirmation');assert.equal(resend.hidden,false);resend.click();await settle();assert.match(d.querySelector('#account-status').textContent,/un nouveau lien a été demandé/);assert.equal(d.querySelector('#account-profile').hidden,true);}finally{dom.window.close();}
+});
+
+test('le bouton de diagnostic indique que le service est joignable',async()=>{
+  const dom=await page(service());try{const d=dom.window.document;d.querySelector('#check-account-service').click();await settle();assert.match(d.querySelector('#account-status').textContent,/connexion au service fonctionne/);assert.equal(d.querySelector('#account-profile').hidden,true);}finally{dom.window.close();}
 });

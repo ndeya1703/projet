@@ -74,3 +74,33 @@ test('le panier valide les données et fusionne sans doubler les quantités exis
   assert.equal(mergeItems(items,[{product,quantity:3}])[0].quantity,3);
   assert.equal(mergeItems(items,[{product:{...product,id:'bag'},quantity:1}]).length,2);
 });
+
+test('les erreurs d’envoi de confirmation distinguent restriction de destinataire, limite et panne SMTP',async()=>{
+  for(const [status,body,expected] of [
+    [403,{error_code:'email_address_not_authorized'},/pas encore configuré pour cette adresse/],
+    [429,{error_code:'over_email_send_rate_limit'},/limite d’envoi/],
+    [500,{code:500,msg:'Error sending confirmation email'},/service d’envoi.*indisponible/],
+  ]){
+    const client=new AccountClient(config,{fetchImpl:async()=>response(body,status)});
+    await assert.rejects(()=>client.signUp('customer@example.test','correct-password','Client'),expected);
+    assert.equal(client.user,null);
+  }
+});
+test('le renvoi de confirmation passe par Supabase sans simuler une connexion',async()=>{
+  let request;
+  const client=new AccountClient(config,{fetchImpl:async(url,options)=>{request={url,options};return response({});}});
+  await client.resendConfirmation('customer@example.test');
+  assert.match(request.url,/\/auth\/v1\/resend$/);
+  assert.deepEqual(JSON.parse(request.options.body),{type:'signup',email:'customer@example.test'});
+  assert.equal(client.user,null);
+});
+
+test('la connexion fonctionne aussi quand AbortSignal.timeout n’est pas disponible',async t=>{
+  t.mock.method(AbortSignal,'timeout',()=>{throw new TypeError('unsupported');});
+  let signal;const client=new AccountClient(config,{fetchImpl:async(url,options)=>{signal=options.signal;return response({external:{email:true},mailer_autoconfirm:false});}});
+  assert.deepEqual(await client.checkConnection(),{emailEnabled:true,confirmationRequired:true});assert.equal(signal.aborted,false);
+});
+test('la vérification de connexion n’envoie pas d’e-mail',async()=>{
+  let sent;const client=new AccountClient(config,{fetchImpl:async(url,options)=>{sent={url,options};return response({external:{email:true},mailer_autoconfirm:false});}});
+  await client.checkConnection();assert.match(sent.url,/\/auth\/v1\/settings$/);assert.equal(sent.options.method,'GET');assert.equal(sent.options.body,undefined);
+});
