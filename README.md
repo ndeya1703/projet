@@ -21,3 +21,5 @@ Pour une marketplace en production : définir le pays et la devise, intégrer l'
 ## Photos des produits
 
 Le formulaire vendeur accepte une photo JPG, PNG ou WebP de 5 Mo maximum, avec aperçu et retrait avant ajout. Elle est convertie localement en JPEG de 800 pixels maximum pour limiter le stockage. Les photos sont conservées avec les produits dans le navigateur et réapparaissent après rechargement. Elles ne sont pas publiées en ligne. Si le stockage est plein, un message indique que le produit reste disponible uniquement pour la session.
+
+Les produits ajoutés localement disposent d’un bouton « Supprimer mon produit » avec confirmation. La suppression retire aussi le produit du panier local. Les produits de démonstration ne disposent pas de ce bouton.
