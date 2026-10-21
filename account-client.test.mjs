@@ -104,3 +104,14 @@ test('la vérification de connexion n’envoie pas d’e-mail',async()=>{
   let sent;const client=new AccountClient(config,{fetchImpl:async(url,options)=>{sent={url,options};return response({external:{email:true},mailer_autoconfirm:false});}});
   await client.checkConnection();assert.match(sent.url,/\/auth\/v1\/settings$/);assert.equal(sent.options.method,'GET');assert.equal(sent.options.body,undefined);
 });
+
+test('la requête conserve le contexte global exigé par le fetch natif du navigateur',async()=>{
+  let requested=false;
+  function nativeLikeFetch(url,options){
+    if(this!==globalThis)throw new TypeError('Illegal invocation');
+    requested=true;return Promise.resolve(response({external:{email:true},mailer_autoconfirm:false}));
+  }
+  const client=new AccountClient(config,{fetchImpl:nativeLikeFetch});
+  assert.deepEqual(await client.checkConnection(),{emailEnabled:true,confirmationRequired:true});
+  assert.equal(requested,true);
+});

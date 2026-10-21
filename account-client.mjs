@@ -36,7 +36,8 @@ export function mergeItems(remote, guest) {
 export class AccountClient {
   constructor(config, { fetchImpl = globalThis.fetch, storage = null } = {}) {
     this.config = config;
-    this.fetch = fetchImpl;
+    // Native window.fetch requires its browser global as receiver.
+    this.fetch = fetchImpl.bind(globalThis);
     this.storage = storage;
     this.session = null;
     this.refreshing = null;

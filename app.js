@@ -1,5 +1,5 @@
 import { accountConfig } from './account-config.mjs';
-import { AccountClient, normalizeItems, mergeItems } from './account-client.mjs';
+import { AccountClient, normalizeItems, mergeItems } from './account-client.mjs?v=20261021-2';
 let sessionStore=null;try{sessionStore=window.sessionStorage;}catch{}
 const account=new AccountClient(accountConfig,{storage:sessionStore});
 // Les confirmations e-mail peuvent renvoyer un fragment contenant des jetons.
